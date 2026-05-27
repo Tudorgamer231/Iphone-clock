@@ -1,0 +1,1425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>iPhone Clock</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%; height: 100%;
+      background: #000;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
+      color: #fff;
+      user-select: none;
+    }
+    @keyframes breathe { 0%,100%{opacity:1} 50%{opacity:0.78} }
+    @keyframes ccSlideIn { from{opacity:0;transform:translate(-50%,-48%) scale(0.94)} to{opacity:1;transform:translate(-50%,-50%) scale(1)} }
+
+    #status-bar {
+      position: fixed; top: 14px; right: 16px;
+      display: flex; align-items: center; gap: 6px;
+      color: rgba(255,255,255,0.5); font-size: 12px;
+      cursor: pointer; padding: 4px 8px; border-radius: 8px;
+      transition: background 0.2s; z-index: 10;
+    }
+    #status-bar:hover { background: rgba(255,255,255,0.07); }
+    #status-bar svg { display: block; }
+
+    /* LANG SWITCHER (inside settings panel) */
+    #lang-switcher { display: flex; gap: 6px; flex-wrap: wrap; }
+    .lang-btn {
+      background: rgba(255,255,255,0.08); border: none;
+      color: rgba(255,255,255,0.4); font-size: 11px; font-weight: 600;
+      letter-spacing: 0.05em; border-radius: 8px;
+      padding: 6px 10px; cursor: pointer;
+      transition: background 0.2s, color 0.2s;
+      font-family: inherit;
+    }
+    .lang-btn.active { background: rgba(255,255,255,0.18); color: #fff; }
+
+    #app {
+      position: fixed; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      cursor: default; padding: 0 16px;
+      transition: background-image 0.6s ease;
+      background-size: cover; background-position: center;
+    }
+    /* wallpaper overlay so text stays readable */
+    #app::before {
+      content: '';
+      position: absolute; inset: 0;
+      background: rgba(0,0,0,0.35);
+      pointer-events: none;
+      z-index: 0;
+      transition: opacity 0.6s;
+    }
+    #app.no-wallpaper::before { opacity: 0; }
+
+    #clock-area {
+      flex: 1; position: relative; z-index: 1;
+      width: 100%; height: 100%;
+      padding: 80px 32px;
+    }
+
+    #clock-face {
+      position: absolute;
+      display: flex; flex-direction: column; align-items: center;
+      gap: 16px;
+      animation: breathe 4s ease-in-out infinite;
+      transition: top 0.6s cubic-bezier(0.34, 1.3, 0.64, 1),
+                  left 0.6s cubic-bezier(0.34, 1.3, 0.64, 1),
+                  transform 0.6s cubic-bezier(0.34, 1.3, 0.64, 1);
+      transform: translate(-50%, -50%);
+    }
+
+    #digits-row {
+      display: flex; flex-direction: row;
+      align-items: center; justify-content: center;
+    }
+    .digit-pair { display: flex; flex-direction: row; align-items: center; }
+    .flip-digit {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 0.6em; line-height: 1;
+      transition: opacity 0.18s ease, transform 0.18s ease, color 0.5s ease, font-size 0.3s ease, font-weight 0.3s ease;
+    }
+    .flip-digit.fading { opacity: 0; transform: scale(0.9) translateY(-6px); }
+    #colon {
+      line-height: 1; width: 0.3em; text-align: center;
+      flex-shrink: 0; margin-bottom: 0.12em;
+      transition: opacity 0.4s ease, color 0.5s ease;
+    }
+    #seconds-row {
+      display: flex; flex-direction: row;
+      align-items: center; justify-content: center; gap: 10px;
+    }
+    .sec-line { height: 1px; width: 32px; background: rgba(255,255,255,0.12); }
+    #date-label {
+      color: rgba(255,255,255,0.3); font-weight: 400;
+      letter-spacing: 0.22em; text-transform: uppercase;
+      transition: color 0.5s; white-space: nowrap;
+    }
+
+    /* POSITION GRID */
+    .pos-cell {
+      width: 100%; aspect-ratio: 1.6;
+      border-radius: 8px; border: 1.5px solid rgba(255,255,255,0.15);
+      background: rgba(255,255,255,0.04); cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .pos-cell:hover { background: rgba(255,255,255,0.1); }
+    .pos-cell.active { border-color: #fff; background: rgba(255,255,255,0.2); }
+    .pos-cell.active::after { content:''; width:6px;height:6px;border-radius:50%;background:#fff; }
+
+    #analog-wrap { display: none; flex-direction: column; align-items: center; gap: 16px; }
+    #analog-wrap svg { width: min(60vw, 300px); height: min(60vw, 300px); }
+
+    /* SETTINGS PANEL — iPhone style */
+    #settings-wrap {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      display: flex; justify-content: center;
+      padding-bottom: 28px; z-index: 5;
+      opacity: 0; transform: translateY(20px);
+      transition: opacity 0.35s ease, transform 0.35s ease;
+      pointer-events: none;
+    }
+    #settings-wrap.visible { opacity: 1; transform: translateY(0); }
+    #settings-wrap.visible #settings-panel { pointer-events: auto; }
+    #settings-panel {
+      background: rgba(18,18,20,0.96);
+      backdrop-filter: blur(40px); -webkit-backdrop-filter: blur(40px);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 22px;
+      width: min(92vw, 380px);
+      max-height: 72vh; overflow-y: auto; overflow-x: hidden;
+      padding: 0 0 12px;
+      scrollbar-width: none;
+    }
+    #settings-panel::-webkit-scrollbar { display: none; }
+    .sp-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 18px 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      position: sticky; top: 0; z-index: 2;
+      background: rgba(18,18,20,0.98);
+      border-radius: 22px 22px 0 0;
+    }
+    .sp-title { font-size: 13px; font-weight: 700; color: #fff; }
+    .sp-close {
+      background: rgba(255,255,255,0.1); border: none; border-radius: 50%;
+      width: 26px; height: 26px; display: flex; align-items: center;
+      justify-content: center; cursor: pointer; color: rgba(255,255,255,0.6); font-size: 12px;
+    }
+    .sp-section-label {
+      font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+      color: rgba(255,255,255,0.3); text-transform: uppercase;
+      padding: 14px 18px 6px;
+    }
+    .sp-group {
+      background: rgba(255,255,255,0.055);
+      border-radius: 14px; margin: 0 12px;
+      overflow: hidden; border: 1px solid rgba(255,255,255,0.07);
+    }
+    .sp-row {
+      display: flex; align-items: center;
+      padding: 11px 14px; gap: 12px;
+    }
+    .sp-row-col { flex-direction: column; align-items: stretch; }
+    .sp-row-col .sp-row-top { display: flex; align-items: center; gap: 12px; }
+    .sp-row-icon {
+      width: 26px; height: 26px; border-radius: 7px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .sp-row-label { font-size: 14px; color: #fff; flex: 1; }
+    .sp-row-value { font-size: 13px; color: rgba(255,255,255,0.4); margin-left: auto; }
+    .sp-divider { height: 1px; background: rgba(255,255,255,0.07); margin-left: 52px; }
+
+    /* NAV ROWS */
+    .sp-nav-row {
+      display: flex; align-items: center;
+      padding: 11px 14px; gap: 12px; cursor: pointer;
+      transition: background 0.15s;
+    }
+    .sp-nav-row:hover { background: rgba(255,255,255,0.04); }
+    .sp-chevron { color: rgba(255,255,255,0.25); font-size: 20px; margin-left: auto; flex-shrink: 0; line-height:1; }
+
+    /* BACK BUTTON */
+    .sp-back-btn {
+      display: flex; align-items: center; gap: 4px;
+      background: none; border: none; cursor: pointer; padding: 0;
+      min-width: 70px;
+    }
+
+    /* SCREENS */
+    #sp-screens { overflow: hidden; position: relative; }
+    .sp-screen { padding-bottom: 4px; }
+
+    @keyframes slideInRight  { from{transform:translateX(60%);opacity:0} to{transform:translateX(0);opacity:1} }
+    @keyframes slideOutLeft  { from{transform:translateX(0);opacity:1} to{transform:translateX(-40%);opacity:0} }
+    @keyframes slideInLeft   { from{transform:translateX(-40%);opacity:0} to{transform:translateX(0);opacity:1} }
+    @keyframes slideOutRight { from{transform:translateX(0);opacity:1} to{transform:translateX(60%);opacity:0} }
+
+    .slide-in-right  { animation: slideInRight  0.28s cubic-bezier(0.4,0,0.2,1) forwards; }
+    .slide-out-left  { animation: slideOutLeft  0.28s cubic-bezier(0.4,0,0.2,1) forwards; }
+    .slide-in-left   { animation: slideInLeft   0.28s cubic-bezier(0.4,0,0.2,1) forwards; }
+    .slide-out-right { animation: slideOutRight 0.28s cubic-bezier(0.4,0,0.2,1) forwards; }
+
+    /* LANG LIST */
+    .lang-list-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 14px; cursor: pointer; transition: background 0.15s;
+    }
+    .lang-list-row:hover { background: rgba(255,255,255,0.04); }
+    .lang-list-row .lang-name { font-size: 14px; color: #fff; }
+    .lang-list-row .lang-check { color: #0A84FF; font-size: 16px; opacity: 0; transition: opacity 0.2s; }
+    .lang-list-row.active .lang-check { opacity: 1; }
+    .range-hints {
+      display: flex; justify-content: space-between;
+      font-size: 10px; color: rgba(255,255,255,0.2); margin-top: 3px;
+    }
+    input[type=range] { width: 100%; cursor: pointer; }
+    #color-palette { display: flex; gap: 10px; flex-wrap: wrap; padding: 2px 0; }
+    .color-dot {
+      width: 28px; height: 28px; border-radius: 50%;
+      border: 2px solid transparent; cursor: pointer;
+      transition: transform 0.15s ease;
+    }
+    .color-dot.active {
+      border-color: #fff; outline: 2px solid rgba(255,255,255,0.4);
+      outline-offset: 2px; transform: scale(1.2);
+    }
+    .color-dot.auto-dot {
+      background: conic-gradient(#FF453A,#FF9F0A,#FFD60A,#30D158,#0A84FF,#BF5AF2,#FF453A);
+    }
+    .color-dot.custom-dot {
+      background: conic-gradient(#FF453A,#FF9F0A,#FFD60A,#30D158,#0A84FF,#BF5AF2,#FF453A);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; line-height: 1;
+    }
+    .toggle-btn {
+      width: 44px; height: 26px; border-radius: 13px;
+      background: rgba(255,255,255,0.12); border: none;
+      cursor: pointer; position: relative; transition: background 0.3s ease;
+      flex-shrink: 0; margin-left: auto;
+    }
+    .toggle-knob {
+      position: absolute; top: 3px; left: 3px;
+      width: 20px; height: 20px; border-radius: 50%;
+      background: #fff; transition: left 0.3s ease;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+    }
+    .toggle-btn.on .toggle-knob { left: 21px; }
+    .wallpaper-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+    .wp-thumb {
+      aspect-ratio: 9/16; border-radius: 8px;
+      cursor: pointer; border: 2px solid transparent;
+      background-size: cover; background-position: center;
+      transition: transform 0.15s, border-color 0.2s;
+    }
+    .wp-thumb:hover { transform: scale(1.05); }
+    .wp-thumb.active { border-color: #fff; }
+    .wp-thumb.none-thumb {
+      background: #111; display: flex; align-items: center;
+      justify-content: center; font-size: 18px;
+    }
+    .wp-upload-btn {
+      aspect-ratio: 9/16; border-radius: 8px; border: 2px dashed rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.04); cursor: pointer;
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 4px; font-size: 10px;
+      color: rgba(255,255,255,0.3); transition: border-color 0.2s, background 0.2s;
+    }
+    .wp-upload-btn:hover { border-color: rgba(255,255,255,0.5); background: rgba(255,255,255,0.08); }
+    #wp-file-input { display: none; }
+    #lang-switcher { display: flex; gap: 6px; flex-wrap: wrap; }
+    .lang-btn {
+      background: rgba(255,255,255,0.08); border: none;
+      color: rgba(255,255,255,0.4); font-size: 11px; font-weight: 600;
+      letter-spacing: 0.05em; border-radius: 8px;
+      padding: 6px 10px; cursor: pointer;
+      transition: background 0.2s, color 0.2s; font-family: inherit;
+    }
+    .lang-btn.active { background: rgba(255,255,255,0.18); color: #fff; }
+
+    #hint {
+      position: absolute; bottom: 16px; z-index: 1;
+      color: rgba(255,255,255,0.1); font-size: 10px;
+      letter-spacing: 0.18em; text-transform: uppercase;
+      transition: opacity 0.3s;
+    }
+    #hint.hidden { opacity: 0; pointer-events: none; }
+
+    /* CC */
+    #cc-overlay {
+      display: none; position: fixed; inset: 0; z-index: 999;
+      background: rgba(0,0,0,0.55); backdrop-filter: blur(2px);
+    }
+    #cc-overlay.visible { display: block; }
+    #cc-panel {
+      display: none; position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%,-50%);
+      width: min(92vw, 340px); max-height: 85vh; overflow-y: auto;
+      background: rgba(28,28,30,0.94);
+      backdrop-filter: blur(40px); -webkit-backdrop-filter: blur(40px);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 24px; padding: 20px 20px 24px; z-index: 1000;
+      animation: ccSlideIn 0.3s cubic-bezier(0.34,1.56,0.64,1);
+    }
+    #cc-panel.visible { display: block; }
+    .cc-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .cc-title { font-size: 15px; font-weight: 700; }
+    .cc-close {
+      background: rgba(255,255,255,0.1); border: none; border-radius: 50%;
+      width: 28px; height: 28px; display: flex; align-items: center;
+      justify-content: center; cursor: pointer; color: #fff; font-size: 14px;
+    }
+    .cc-section { background: rgba(255,255,255,0.06); border-radius: 16px; padding: 14px 16px; margin-bottom: 10px; }
+    .cc-sec-label { font-size: 11px; color: rgba(255,255,255,0.4); font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 8px; }
+    .cc-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+    .cc-key { font-size: 12px; color: rgba(255,255,255,0.45); }
+    .cc-val { font-size: 12px; color: rgba(255,255,255,0.7); font-weight: 500; text-align: right; max-width: 55%; word-break: break-all; }
+    .cc-big { font-size: 14px; color: #fff; font-weight: 500; }
+    .cc-sub { font-size: 12px; color: rgba(255,255,255,0.45); margin-top: 2px; }
+    .cc-net-row { display: flex; align-items: center; gap: 10px; }
+  </style>
+</head>
+<body>
+
+<!-- LANG BAR -->
+<!-- STATUS BAR -->
+<div id="status-bar" title="System Info">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 4v16"/></svg>
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01"/></svg>
+  <span id="battery-pct"></span>
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="6" width="18" height="12" rx="2" ry="2"/><line x1="23" y1="13" x2="23" y2="11"/></svg>
+</div>
+
+<!-- CC -->
+<div id="cc-overlay"></div>
+<div id="cc-panel">
+  <div class="cc-header">
+    <span class="cc-title" id="cc-title-txt">System Info</span>
+    <button class="cc-close" id="cc-close">✕</button>
+  </div>
+  <div class="cc-section">
+    <div class="cc-sec-label" id="cc-lbl-time">Local Time</div>
+    <div class="cc-big" id="cc-time"></div>
+    <div class="cc-sub" id="cc-date-long"></div>
+  </div>
+  <div class="cc-section">
+    <div class="cc-sec-label" id="cc-lbl-display">Display</div>
+    <div class="cc-row"><span class="cc-key" id="cc-lbl-res">Resolution</span><span class="cc-val" id="cc-res"></span></div>
+    <div class="cc-row"><span class="cc-key" id="cc-lbl-dpr">Pixel Ratio</span><span class="cc-val" id="cc-dpr"></span></div>
+  </div>
+  <div class="cc-section">
+    <div class="cc-sec-label" id="cc-lbl-net">Network</div>
+    <div class="cc-net-row">
+      <svg id="cc-wifi-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#30D158" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01"/></svg>
+      <div><div class="cc-big" id="cc-online"></div><div class="cc-sub" id="cc-conn"></div></div>
+    </div>
+  </div>
+  <div class="cc-section">
+    <div class="cc-sec-label" id="cc-lbl-sys">System</div>
+    <div class="cc-row"><span class="cc-key" id="cc-lbl-platform">Platform</span><span class="cc-val" id="cc-platform"></span></div>
+    <div class="cc-row"><span class="cc-key" id="cc-lbl-browser">Browser</span><span class="cc-val" id="cc-browser"></span></div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app" class="no-wallpaper">
+  <div id="clock-area">
+    <div id="clock-face">
+    <div id="digital-wrap">
+      <div id="digits-row">
+        <div class="digit-pair">
+          <span class="flip-digit" id="h0"></span>
+          <span class="flip-digit" id="h1"></span>
+        </div>
+        <span id="colon">:</span>
+        <div class="digit-pair">
+          <span class="flip-digit" id="m0"></span>
+          <span class="flip-digit" id="m1"></span>
+        </div>
+      </div>
+      <div id="seconds-row">
+        <div class="sec-line"></div>
+        <div class="digit-pair">
+          <span class="flip-digit" id="s0" style="color:rgba(255,255,255,0.28);font-size:5vw;font-weight:300;"></span>
+          <span class="flip-digit" id="s1" style="color:rgba(255,255,255,0.28);font-size:5vw;font-weight:300;"></span>
+        </div>
+        <div class="sec-line"></div>
+      </div>
+      <p id="date-label"></p>
+    </div>
+
+    <div id="analog-wrap">
+      <svg id="analog-svg" viewBox="0 0 300 300" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="150" cy="150" r="140" fill="none" id="analog-ring" stroke-width="2"/>
+        <g id="analog-markers"></g>
+        <g id="analog-numbers"></g>
+        <line id="hand-hour"   x1="150" y1="150" x2="150" y2="70"  stroke-width="5" stroke-linecap="round"/>
+        <line id="hand-minute" x1="150" y1="150" x2="150" y2="45"  stroke="#FFFFFF" stroke-width="3" stroke-linecap="round"/>
+        <line id="hand-second" x1="150" y1="170" x2="150" y2="35"  stroke="#FF453A" stroke-width="1.5" stroke-linecap="round"/>
+        <circle cx="150" cy="150" r="5" fill="#FF453A"/>
+        <circle cx="150" cy="150" r="2" fill="#000"/>
+      </svg>
+      <p id="analog-date" style="color:rgba(255,255,255,0.28);font-size:clamp(10px,1.2vw,14px);letter-spacing:0.22em;text-transform:uppercase;white-space:nowrap;"></p>
+    </div>
+    </div><!-- end clock-face -->
+  </div>
+
+  <!-- SETTINGS PANEL -->
+  <div id="settings-wrap">
+    <div id="settings-panel">
+
+      <!-- ── HEADER ── -->
+      <div class="sp-header">
+        <button id="sp-back" class="sp-back-btn" style="display:none;">
+          <svg width="8" height="14" viewBox="0 0 8 14" fill="none" stroke="#0A84FF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 1 1 7 7 13"/></svg>
+          <span id="sp-back-label" style="color:#0A84FF;font-size:14px;font-weight:500;"></span>
+        </button>
+        <p class="sp-title" id="panel-title-txt">Settings</p>
+        <button id="settings-close" class="sp-close">✕</button>
+      </div>
+
+      <!-- ── SCREENS CONTAINER ── -->
+      <div id="sp-screens">
+
+        <!-- ROOT SCREEN -->
+        <div class="sp-screen" id="screen-root">
+          <p class="sp-section-label" id="lbl-sec-appearance">Appearance</p>
+          <div class="sp-group">
+            <div class="sp-nav-row" data-target="screen-color">
+              <div class="sp-row-icon" style="background:#BF5AF2;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/></svg></div>
+              <span class="sp-row-label" id="lbl-color">Color</span>
+              <span class="sp-row-value" id="nav-color-val"></span>
+              <span class="sp-chevron">›</span>
+            </div>
+            <div class="sp-divider"></div>
+            <div class="sp-nav-row" data-target="screen-font">
+              <div class="sp-row-icon" style="background:#FF9F0A;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h8a4 4 0 0 1 0 8H6z"/><path d="M6 12h9a4 4 0 0 1 0 8H6z"/></svg></div>
+              <span class="sp-row-label" id="lbl-font">Font</span>
+              <span class="sp-row-value" id="nav-font-val"></span>
+              <span class="sp-chevron">›</span>
+            </div>
+          </div>
+
+          <p class="sp-section-label" id="lbl-sec-display">Display</p>
+          <div class="sp-group">
+            <div class="sp-row">
+              <div class="sp-row-icon" style="background:#30D158;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+              <span class="sp-row-label" id="lbl-analog">Analog Mode</span>
+              <button class="toggle-btn" id="analog-toggle"><span class="toggle-knob"></span></button>
+            </div>
+            <div class="sp-divider"></div>
+            <div class="sp-nav-row" data-target="screen-position">
+              <div class="sp-row-icon" style="background:#0A84FF;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg></div>
+              <span class="sp-row-label" id="lbl-pos">Position</span>
+              <span class="sp-row-value" id="nav-pos-val"></span>
+              <span class="sp-chevron">›</span>
+            </div>
+          </div>
+
+          <p class="sp-section-label" id="lbl-sec-wallpaper">Wallpaper</p>
+          <div class="sp-group">
+            <div class="sp-nav-row" data-target="screen-wallpaper">
+              <div class="sp-row-icon" style="background:#FF375F;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></div>
+              <span class="sp-row-label" id="lbl-wallpaper">Wallpaper</span>
+              <span class="sp-chevron">›</span>
+            </div>
+          </div>
+
+          <p class="sp-section-label" id="lbl-sec-language">Language</p>
+          <div class="sp-group">
+            <div class="sp-nav-row" data-target="screen-language">
+              <div class="sp-row-icon" style="background:#64D2FF;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></div>
+              <span class="sp-row-label" id="lbl-lang">Language</span>
+              <span class="sp-row-value" id="nav-lang-val"></span>
+              <span class="sp-chevron">›</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- COLOR SCREEN -->
+        <div class="sp-screen" id="screen-color" style="display:none;">
+          <div class="sp-group">
+            <div class="sp-row sp-row-col" style="padding-bottom:16px;">
+              <div id="color-palette" style="padding:4px 0;"></div>
+              <input type="color" id="custom-color-input" value="#FF9F0A" style="display:none;position:absolute;">
+            </div>
+          </div>
+        </div>
+
+        <!-- FONT SCREEN -->
+        <div class="sp-screen" id="screen-font" style="display:none;">
+          <div class="sp-group">
+            <div class="sp-row sp-row-col">
+              <div class="sp-row-top">
+                <div class="sp-row-icon" style="background:#FF9F0A;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h8a4 4 0 0 1 0 8H6z"/><path d="M6 12h9a4 4 0 0 1 0 8H6z"/></svg></div>
+                <span class="sp-row-label" id="lbl-fw">Font Weight</span>
+                <span class="sp-row-value" id="fw-val">100</span>
+              </div>
+              <input type="range" id="fw-range" min="100" max="900" step="100" value="100" style="margin-top:10px;">
+              <div class="range-hints"><span id="fw-hint-l">Thin</span><span id="fw-hint-r">Heavy</span></div>
+            </div>
+            <div class="sp-divider"></div>
+            <div class="sp-row sp-row-col">
+              <div class="sp-row-top">
+                <div class="sp-row-icon" style="background:#FF453A;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></div>
+                <span class="sp-row-label" id="lbl-fs">Font Size</span>
+                <span class="sp-row-value" id="fs-val">17vw</span>
+              </div>
+              <input type="range" id="fs-range" min="8" max="28" step="1" value="17" style="margin-top:10px;">
+              <div class="range-hints"><span id="fs-hint-l">Small</span><span id="fs-hint-r">Large</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- POSITION SCREEN -->
+        <div class="sp-screen" id="screen-position" style="display:none;">
+          <div class="sp-group">
+            <div class="sp-row sp-row-col" style="padding-bottom:16px;">
+              <div id="pos-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:100%;margin-top:4px;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- WALLPAPER SCREEN -->
+        <div class="sp-screen" id="screen-wallpaper" style="display:none;">
+          <div class="sp-group">
+            <div class="sp-row sp-row-col" style="padding-bottom:16px;">
+              <div class="wallpaper-grid" id="wp-grid" style="margin-top:4px;"></div>
+              <input type="file" id="wp-file-input" accept="image/*">
+            </div>
+          </div>
+        </div>
+
+        <!-- LANGUAGE SCREEN -->
+        <div class="sp-screen" id="screen-language" style="display:none;">
+          <div class="sp-group" id="lang-list">
+            <!-- filled by JS -->
+          </div>
+        </div>
+
+      </div><!-- end sp-screens -->
+    </div>
+  </div>
+
+  <p id="hint">Tap for settings</p>
+</div>
+
+<script>
+// ─────────────────────────────────────────────
+// I18N
+// ─────────────────────────────────────────────
+const LANGS = {
+  en: {
+    code: 'EN', days: ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'],
+    months: ['January','February','March','April','May','June','July','August','September','October','November','December'],
+    hint: 'Tap for settings', panelTitle: 'Clock Settings',
+    lblColor: 'Color', lblFw: 'Font Weight', lblFs: 'Font Size',
+    lblAnalog: 'Analog Mode', lblWallpaper: 'Wallpaper',
+    fwL: 'Thin', fwR: 'Heavy', fsL: 'Small', fsR: 'Large',
+    ccTitle: 'System Info', ccTime: 'Local Time', ccDisplay: 'Display',
+    ccRes: 'Resolution', ccDpr: 'Pixel Ratio', ccNet: 'Network',
+    ccOnline: 'Connected', ccOffline: 'Offline', ccSys: 'System',
+    ccPlatform: 'Platform', ccBrowser: 'Browser',
+    wpNone: 'None', wpUpload: 'Upload',
+    colorNames: ['White','Yellow','Orange','Blue','Green','Pink','Red','Purple','Auto'],
+    lblLang: 'Language', lblPos: 'Position',
+    secAppearance: 'Appearance', secDisplay: 'Display', secWallpaper: 'Wallpaper', secLanguage: 'Language',
+  },
+  ro: {
+    code: 'RO', days: ['Duminică','Luni','Marți','Miercuri','Joi','Vineri','Sâmbătă'],
+    months: ['Ianuarie','Februarie','Martie','Aprilie','Mai','Iunie','Iulie','August','Septembrie','Octombrie','Noiembrie','Decembrie'],
+    hint: 'Atinge pentru setări', panelTitle: 'Setări ceas',
+    lblColor: 'Culoare', lblFw: 'Grosime font', lblFs: 'Mărime font',
+    lblAnalog: 'Mod analogic', lblWallpaper: 'Fundal',
+    fwL: 'Subțire', fwR: 'Gros', fsL: 'Mic', fsR: 'Mare',
+    ccTitle: 'Info sistem', ccTime: 'Timp local', ccDisplay: 'Display',
+    ccRes: 'Rezoluție', ccDpr: 'Pixel Ratio', ccNet: 'Rețea',
+    ccOnline: 'Conectat', ccOffline: 'Offline', ccSys: 'Sistem',
+    ccPlatform: 'Platformă', ccBrowser: 'Browser',
+    wpNone: 'Niciunul', wpUpload: 'Încarcă',
+    colorNames: ['Alb','Galben','Portocaliu','Albastru','Verde','Roz','Roșu','Violet','Auto'],
+    lblLang: 'Limbă', lblPos: 'Poziție',
+    secAppearance: 'Aspect', secDisplay: 'Afișare', secWallpaper: 'Fundal', secLanguage: 'Limbă',
+  },
+  de: {
+    code: 'DE', days: ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'],
+    months: ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'],
+    hint: 'Tippen für Einstellungen', panelTitle: 'Uhr Einstellungen',
+    lblColor: 'Farbe', lblFw: 'Schriftgewicht', lblFs: 'Schriftgröße',
+    lblAnalog: 'Analogmodus', lblWallpaper: 'Hintergrundbild',
+    fwL: 'Dünn', fwR: 'Fett', fsL: 'Klein', fsR: 'Groß',
+    ccTitle: 'Systeminfo', ccTime: 'Ortszeit', ccDisplay: 'Display',
+    ccRes: 'Auflösung', ccDpr: 'Pixelverhältnis', ccNet: 'Netzwerk',
+    ccOnline: 'Verbunden', ccOffline: 'Offline', ccSys: 'System',
+    ccPlatform: 'Plattform', ccBrowser: 'Browser',
+    wpNone: 'Keins', wpUpload: 'Hochladen',
+    colorNames: ['Weiß','Gelb','Orange','Blau','Grün','Rosa','Rot','Lila','Auto'],
+    lblLang: 'Sprache', lblPos: 'Position',
+    secAppearance: 'Darstellung', secDisplay: 'Anzeige', secWallpaper: 'Hintergrundbild', secLanguage: 'Sprache',
+  },
+  fr: {
+    code: 'FR', days: ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'],
+    months: ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'],
+    hint: 'Appuyez pour réglages', panelTitle: 'Réglages horloge',
+    lblColor: 'Couleur', lblFw: 'Épaisseur police', lblFs: 'Taille police',
+    lblAnalog: 'Mode analogique', lblWallpaper: 'Fond d\'écran',
+    fwL: 'Fin', fwR: 'Gras', fsL: 'Petit', fsR: 'Grand',
+    ccTitle: 'Infos système', ccTime: 'Heure locale', ccDisplay: 'Affichage',
+    ccRes: 'Résolution', ccDpr: 'Ratio pixels', ccNet: 'Réseau',
+    ccOnline: 'Connecté', ccOffline: 'Hors ligne', ccSys: 'Système',
+    ccPlatform: 'Plateforme', ccBrowser: 'Navigateur',
+    wpNone: 'Aucun', wpUpload: 'Importer',
+    colorNames: ['Blanc','Jaune','Orange','Bleu','Vert','Rose','Rouge','Violet','Auto'],
+    lblLang: 'Langue', lblPos: 'Position',
+    secAppearance: 'Apparence', secDisplay: 'Affichage', secWallpaper: 'Fond d\'écran', secLanguage: 'Langue',
+  },
+  es: {
+    code: 'ES', days: ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'],
+    months: ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'],
+    hint: 'Toca para ajustes', panelTitle: 'Ajustes del reloj',
+    lblColor: 'Color', lblFw: 'Grosor fuente', lblFs: 'Tamaño fuente',
+    lblAnalog: 'Modo analógico', lblWallpaper: 'Fondo de pantalla',
+    fwL: 'Fino', fwR: 'Grueso', fsL: 'Pequeño', fsR: 'Grande',
+    ccTitle: 'Info sistema', ccTime: 'Hora local', ccDisplay: 'Pantalla',
+    ccRes: 'Resolución', ccDpr: 'Ratio píxel', ccNet: 'Red',
+    ccOnline: 'Conectado', ccOffline: 'Sin conexión', ccSys: 'Sistema',
+    ccPlatform: 'Plataforma', ccBrowser: 'Navegador',
+    wpNone: 'Ninguno', wpUpload: 'Subir',
+    colorNames: ['Blanco','Amarillo','Naranja','Azul','Verde','Rosa','Rojo','Violeta','Auto'],
+    lblLang: 'Idioma', lblPos: 'Posición',
+    secAppearance: 'Apariencia', secDisplay: 'Pantalla', secWallpaper: 'Fondo', secLanguage: 'Idioma',
+  },
+  ja: {
+    code: 'JA', days: ['日曜日','月曜日','火曜日','水曜日','木曜日','金曜日','土曜日'],
+    months: ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'],
+    hint: '設定はタップ', panelTitle: '時計の設定',
+    lblColor: '色', lblFw: 'フォントの太さ', lblFs: 'フォントサイズ',
+    lblAnalog: 'アナログモード', lblWallpaper: '壁紙',
+    fwL: '細い', fwR: '太い', fsL: '小', fsR: '大',
+    ccTitle: 'システム情報', ccTime: '現地時刻', ccDisplay: 'ディスプレイ',
+    ccRes: '解像度', ccDpr: 'ピクセル比', ccNet: 'ネットワーク',
+    ccOnline: '接続中', ccOffline: 'オフライン', ccSys: 'システム',
+    ccPlatform: 'プラットフォーム', ccBrowser: 'ブラウザ',
+    wpNone: 'なし', wpUpload: 'アップロード',
+    colorNames: ['白','黄','橙','青','緑','ピンク','赤','紫','自動'],
+    lblLang: '言語', lblPos: '位置',
+    secAppearance: '外観', secDisplay: '表示', secWallpaper: '壁紙', secLanguage: '言語',
+  },
+};
+const LANG_ORDER = ['en','ro','de','fr','es','ja'];
+
+// ─────────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────────
+const state = {
+  lang: 'en',
+  color: null,
+  fontWeight: 100,
+  fontSize: 17,
+  analog: false,
+  wallpaper: null,
+  autoColor: true,
+  wallpaperAutoColor: '#FF9F0A',
+  customColor: null,
+  customColorActive: false,
+  clockPos: 'center-center', // row-col: top/center/bottom + left/center/right
+};
+
+const COLORS = [
+  '#FFFFFF','#FFD60A','#FF9F0A','#0A84FF',
+  '#30D158','#FF375F','#FF453A','#BF5AF2',
+];
+
+// Built-in wallpaper presets (CSS gradients as background-image values)
+const WP_PRESETS = [
+  { id: 'aurora',  bg: 'linear-gradient(135deg,#0f2027,#203a43,#2c5364)', accent: '#30D158' },
+  { id: 'sunset',  bg: 'linear-gradient(160deg,#c94b4b,#4b134f,#000)', accent: '#FF9F0A' },
+  { id: 'ocean',   bg: 'linear-gradient(160deg,#0052d4,#4364f7,#6fb1fc)', accent: '#FFFFFF' },
+  { id: 'forest',  bg: 'linear-gradient(160deg,#134e5e,#71b280)', accent: '#FFD60A' },
+  { id: 'midnight',bg: 'linear-gradient(160deg,#0f0c29,#302b63,#24243e)', accent: '#BF5AF2' },
+  { id: 'cherry',  bg: 'linear-gradient(160deg,#eb3349,#f45c43)', accent: '#FFFFFF' },
+];
+
+// ─────────────────────────────────────────────
+// DOM helpers
+// ─────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const digits = { h0:$('h0'),h1:$('h1'),m0:$('m0'),m1:$('m1'),s0:$('s0'),s1:$('s1') };
+
+// ─────────────────────────────────────────────
+// NAVIGATION
+// ─────────────────────────────────────────────
+const navStack = ['root'];
+const screenTitles = {
+  root: () => t('panelTitle'),
+  color: () => t('lblColor'),
+  font: () => t('lblFont') || 'Font',
+  position: () => t('lblPos'),
+  wallpaper: () => t('lblWallpaper'),
+  language: () => t('lblLang'),
+};
+
+function navTo(screenId) {
+  const current = $('screen-' + navStack[navStack.length-1]);
+  const next    = $('screen-' + screenId);
+  if (!next || current === next) return;
+
+  current.classList.add('slide-out-left');
+  next.style.display = 'block';
+  next.classList.add('slide-in-right');
+
+  setTimeout(() => {
+    current.style.display = 'none';
+    current.classList.remove('slide-out-left');
+    next.classList.remove('slide-in-right');
+  }, 280);
+
+  navStack.push(screenId);
+  updateHeader();
+  resetHideTimer();
+}
+
+function navBack() {
+  if (navStack.length <= 1) return;
+  const current = $('screen-' + navStack[navStack.length-1]);
+  navStack.pop();
+  const prev = $('screen-' + navStack[navStack.length-1]);
+
+  current.classList.add('slide-out-right');
+  prev.style.display = 'block';
+  prev.classList.add('slide-in-left');
+
+  setTimeout(() => {
+    current.style.display = 'none';
+    current.classList.remove('slide-out-right');
+    prev.classList.remove('slide-in-left');
+  }, 280);
+
+  updateHeader();
+  resetHideTimer();
+}
+
+function updateHeader() {
+  const isRoot = navStack.length === 1;
+  const backBtn = $('sp-back');
+  backBtn.style.display = isRoot ? 'none' : 'flex';
+  if (!isRoot) {
+    const parentId = navStack[navStack.length - 2];
+    $('sp-back-label').textContent = screenTitles[parentId]?.() || 'Back';
+  }
+  $('panel-title-txt').textContent = screenTitles[navStack[navStack.length-1]]?.() || '';
+}
+
+// Wire nav rows
+document.addEventListener('DOMContentLoaded', () => {});
+function wireNavRows() {
+  document.querySelectorAll('.sp-nav-row[data-target]').forEach(row => {
+    row.addEventListener('click', e => {
+      e.stopPropagation();
+      const target = row.dataset.target.replace('screen-', '');
+      navTo(target);
+    });
+  });
+  $('sp-back').addEventListener('click', e => { e.stopPropagation(); navBack(); });
+}
+
+// ─────────────────────────────────────────────
+// LANG LIST (replaces lang switcher)
+// ─────────────────────────────────────────────
+const LANG_FULL_NAMES = { en:'English', ro:'Română', de:'Deutsch', fr:'Français', es:'Español', ja:'日本語' };
+
+function buildLangList() {
+  const list = $('lang-list');
+  if (!list) return;
+  list.innerHTML = '';
+  LANG_ORDER.forEach((lc, i) => {
+    const row = document.createElement('div');
+    row.className = 'lang-list-row' + (lc === state.lang ? ' active' : '');
+    row.innerHTML = `<span class="lang-name">${LANG_FULL_NAMES[lc]}</span><span class="lang-check">✓</span>`;
+    row.addEventListener('click', e => {
+      e.stopPropagation();
+      setLang(lc);
+      list.querySelectorAll('.lang-list-row').forEach(r => r.classList.remove('active'));
+      row.classList.add('active');
+      updateNavValues();
+      resetHideTimer();
+    });
+    if (i > 0) {
+      const div = document.createElement('div');
+      div.className = 'sp-divider';
+      div.style.marginLeft = '14px';
+      list.appendChild(div);
+    }
+    list.appendChild(row);
+  });
+}
+
+function buildLangBar() { buildLangList(); } // alias for applyLangUI calls
+
+function updateNavValues() {
+  const colorVal = $('nav-color-val');
+  if (colorVal) colorVal.textContent = state.autoColor ? 'Auto' : '';
+  const fontVal = $('nav-font-val');
+  if (fontVal) fontVal.textContent = state.fontWeight;
+  const posVal = $('nav-pos-val');
+  const posNames = {
+    'top-left':'↖','top-center':'↑','top-right':'↗',
+    'center-left':'←','center-center':'·','center-right':'→',
+    'bottom-left':'↙','bottom-center':'↓','bottom-right':'↘'
+  };
+  if (posVal) posVal.textContent = posNames[state.clockPos] || '';
+  const langVal = $('nav-lang-val');
+  if (langVal) langVal.textContent = LANGS[state.lang].code;
+}
+
+function setLang(lc) {
+  state.lang = lc;
+  applyLangUI();
+  tick();
+}
+
+function t(key) { return LANGS[state.lang][key] || LANGS['en'][key]; }
+
+function applyLangUI() {
+  $('hint').textContent          = t('hint');
+  $('panel-title-txt').textContent = t('panelTitle');
+  $('lbl-color').textContent     = t('lblColor');
+  const fwEl = $('lbl-fw');
+  fwEl.childNodes[0].textContent = t('lblFw') + ' ';
+  $('fw-hint-l').textContent     = t('fwL');
+  $('fw-hint-r').textContent     = t('fwR');
+  const fsEl = $('lbl-fs');
+  fsEl.childNodes[0].textContent = t('lblFs') + ' ';
+  $('fs-hint-l').textContent     = t('fsL');
+  $('fs-hint-r').textContent     = t('fsR');
+  $('lbl-analog').textContent    = t('lblAnalog');
+  $('lbl-sec-appearance').textContent = t('secAppearance');
+  $('lbl-sec-display').textContent    = t('secDisplay');
+  $('lbl-sec-wallpaper').textContent  = t('secWallpaper');
+  $('lbl-sec-language').textContent   = t('secLanguage');
+  $('lbl-pos').textContent       = t('lblPos');
+  $('lbl-lang').textContent      = t('lblLang');
+  buildLangBar();
+  $('lbl-wallpaper').textContent = t('lblWallpaper');
+  // CC
+  $('cc-title-txt').textContent  = t('ccTitle');
+  $('cc-lbl-time').textContent   = t('ccTime');
+  $('cc-lbl-display').textContent= t('ccDisplay');
+  $('cc-lbl-res').textContent    = t('ccRes');
+  $('cc-lbl-dpr').textContent    = t('ccDpr');
+  $('cc-lbl-net').textContent    = t('ccNet');
+  $('cc-lbl-sys').textContent    = t('ccSys');
+  $('cc-lbl-platform').textContent = t('ccPlatform');
+  $('cc-lbl-browser').textContent  = t('ccBrowser');
+  // color dot titles
+  const dots = $('color-palette').querySelectorAll('.color-dot');
+  const names = t('colorNames');
+  dots.forEach((d,i) => { if(names[i]) d.title = names[i]; });
+  // wp grid labels
+  rebuildWpGrid();
+}
+
+// ─────────────────────────────────────────────
+// COLOR PALETTE
+// ─────────────────────────────────────────────
+function buildColorPalette() {
+  const pal = $('color-palette');
+  pal.innerHTML = '';
+  // auto dot
+  const autoDot = document.createElement('div');
+  autoDot.className = 'color-dot auto-dot' + (state.autoColor ? ' active' : '');
+  autoDot.dataset.color = 'auto';
+  autoDot.title = t('colorNames')[8] || 'Auto';
+  autoDot.addEventListener('click', e => {
+    e.stopPropagation();
+    state.autoColor = true;
+    state.customColorActive = false;
+    state.color = state.wallpaperAutoColor;
+    refreshColorDots();
+    applyStyles();
+    buildAnalogMarkers();
+    resetHideTimer();
+  });
+  pal.appendChild(autoDot);
+
+  COLORS.forEach((hex, i) => {
+    const btn = document.createElement('div');
+    btn.className = 'color-dot' + (!state.autoColor && state.color === hex ? ' active' : '');
+    btn.style.background = hex;
+    btn.dataset.color = hex;
+    btn.title = (t('colorNames') || [])[i] || hex;
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      state.autoColor = false;
+      state.customColorActive = false;
+      state.color = hex;
+      refreshColorDots();
+      applyStyles();
+      buildAnalogMarkers();
+      resetHideTimer();
+    });
+    pal.appendChild(btn);
+  });
+
+  // Custom color picker dot
+  const customDot = document.createElement('div');
+  customDot.className = 'color-dot custom-dot' + (state.customColorActive ? ' active' : '');
+  customDot.dataset.color = 'custom';
+  customDot.title = 'Custom';
+  customDot.textContent = '✎';
+  customDot.style.background = state.customColor || 'conic-gradient(#FF453A,#FF9F0A,#FFD60A,#30D158,#0A84FF,#BF5AF2,#FF453A)';
+  customDot.addEventListener('click', e => {
+    e.stopPropagation();
+    $('custom-color-input').value = state.customColor || '#FF9F0A';
+    $('custom-color-input').click();
+    resetHideTimer();
+  });
+  pal.appendChild(customDot);
+
+  $('custom-color-input').addEventListener('input', e => {
+    const hex = e.target.value;
+    state.customColor = hex;
+    state.autoColor = false;
+    state.customColorActive = true;
+    state.color = hex;
+    // update dot appearance
+    const dot = $('color-palette').querySelector('[data-color="custom"]');
+    if (dot) dot.style.background = hex;
+    refreshColorDots();
+    applyStyles();
+    buildAnalogMarkers();
+  });
+}
+
+function refreshColorDots() {
+  const dots = $('color-palette').querySelectorAll('.color-dot');
+  dots.forEach(d => {
+    if (d.dataset.color === 'auto') d.classList.toggle('active', state.autoColor);
+    else if (d.dataset.color === 'custom') d.classList.toggle('active', state.customColorActive);
+    else d.classList.toggle('active', !state.autoColor && !state.customColorActive && d.dataset.color === state.color);
+  });
+}
+
+// ─────────────────────────────────────────────
+// WALLPAPER
+// ─────────────────────────────────────────────
+function rebuildWpGrid() {
+  const grid = $('wp-grid');
+  grid.innerHTML = '';
+
+  // "None" option
+  const none = document.createElement('div');
+  none.className = 'wp-thumb none-thumb' + (!state.wallpaper ? ' active' : '');
+  none.textContent = '✕';
+  none.title = t('wpNone');
+  none.addEventListener('click', e => { e.stopPropagation(); setWallpaper(null); resetHideTimer(); });
+  grid.appendChild(none);
+
+  // Presets
+  WP_PRESETS.forEach(wp => {
+    const thumb = document.createElement('div');
+    thumb.className = 'wp-thumb' + (state.wallpaper === wp.id ? ' active' : '');
+    thumb.style.backgroundImage = wp.bg;
+    thumb.dataset.wpid = wp.id;
+    thumb.addEventListener('click', e => { e.stopPropagation(); setWallpaper(wp.id); resetHideTimer(); });
+    grid.appendChild(thumb);
+  });
+
+  // Upload
+  const upBtn = document.createElement('div');
+  upBtn.className = 'wp-upload-btn';
+  upBtn.innerHTML = `<span style="font-size:20px">+</span><span>${t('wpUpload')}</span>`;
+  upBtn.addEventListener('click', e => { e.stopPropagation(); $('wp-file-input').click(); });
+  grid.appendChild(upBtn);
+}
+
+function setWallpaper(id) {
+  state.wallpaper = id;
+  const app = $('app');
+
+  if (!id) {
+    app.style.backgroundImage = '';
+    app.classList.add('no-wallpaper');
+    state.wallpaperAutoColor = '#FF9F0A';
+  } else if (id.startsWith('data:')) {
+    // custom upload
+    app.style.backgroundImage = `url('${id}')`;
+    app.classList.remove('no-wallpaper');
+    extractDominantColor(id);
+  } else {
+    const wp = WP_PRESETS.find(w => w.id === id);
+    if (wp) {
+      app.style.backgroundImage = wp.bg;
+      app.classList.remove('no-wallpaper');
+      state.wallpaperAutoColor = wp.accent;
+    }
+  }
+
+  if (state.autoColor) {
+    state.color = state.wallpaperAutoColor;
+    applyStyles();
+    buildAnalogMarkers();
+  }
+  rebuildWpGrid();
+}
+
+// Extract dominant color from uploaded image via canvas
+function extractDominantColor(dataUrl) {
+  const img = new Image();
+  img.onload = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 50; canvas.height = 50;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, 50, 50);
+    const data = ctx.getImageData(0,0,50,50).data;
+    let r=0,g=0,b=0,count=0;
+    for(let i=0;i<data.length;i+=4){
+      // skip very dark or very light pixels
+      const luma = 0.299*data[i]+0.587*data[i+1]+0.114*data[i+2];
+      if(luma > 40 && luma < 220){
+        r+=data[i]; g+=data[i+1]; b+=data[i+2]; count++;
+      }
+    }
+    if(count>0){ r=Math.round(r/count); g=Math.round(g/count); b=Math.round(b/count); }
+    // boost saturation — make it vivid
+    const max=Math.max(r,g,b), min=Math.min(r,g,b);
+    const boost = 1.6;
+    const mid = (max+min)/2;
+    r = Math.min(255, Math.round(mid + (r-mid)*boost));
+    g = Math.min(255, Math.round(mid + (g-mid)*boost));
+    b = Math.min(255, Math.round(mid + (b-mid)*boost));
+    state.wallpaperAutoColor = `rgb(${r},${g},${b})`;
+    if(state.autoColor){ state.color = state.wallpaperAutoColor; applyStyles(); buildAnalogMarkers(); }
+  };
+  img.src = dataUrl;
+}
+
+$('wp-file-input').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => { state.wallpaper = ev.target.result; setWallpaper(ev.target.result); };
+  reader.readAsDataURL(file);
+  e.target.value = '';
+});
+
+// ─────────────────────────────────────────────
+// STYLE APPLICATION
+// ─────────────────────────────────────────────
+function applyStyles() {
+  const fSize   = state.fontSize + 'vw';
+  const secSize = Math.max(state.fontSize * 0.45, 3) + 'vw';
+  const c  = state.color || '#FF9F0A';
+  const fw = state.fontWeight;
+
+  ['h0','h1','m0','m1'].forEach(id => {
+    digits[id].style.color      = c;
+    digits[id].style.fontSize   = fSize;
+    digits[id].style.fontWeight = fw;
+  });
+  ['s0','s1'].forEach(id => { digits[id].style.fontSize = secSize; });
+
+  $('colon').style.color      = c;
+  $('colon').style.fontSize   = fSize;
+  $('colon').style.fontWeight = fw;
+  $('date-label').style.fontSize = Math.max(state.fontSize * 0.09, 0.9) + 'vw';
+
+  const hand = $('hand-hour');
+  if (hand) { hand.setAttribute('stroke', c); $('analog-ring').setAttribute('stroke', c + '33'); }
+
+  $('fw-range').style.accentColor = c;
+  $('fs-range').style.accentColor = c;
+  $('analog-toggle').style.background = state.analog ? c : 'rgba(255,255,255,0.12)';
+}
+
+// ─────────────────────────────────────────────
+// ANALOG MARKERS
+// ─────────────────────────────────────────────
+function buildAnalogMarkers() {
+  const markersG = $('analog-markers'), numbersG = $('analog-numbers');
+  markersG.innerHTML = ''; numbersG.innerHTML = '';
+  const c = state.color || '#FF9F0A';
+
+  for(let i=0;i<60;i++){
+    const isHour = i%5===0;
+    const angle = (i*6-90)*Math.PI/180;
+    const r1 = isHour?120:126, r2=134;
+    const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+    line.setAttribute('x1',150+r1*Math.cos(angle)); line.setAttribute('y1',150+r1*Math.sin(angle));
+    line.setAttribute('x2',150+r2*Math.cos(angle)); line.setAttribute('y2',150+r2*Math.sin(angle));
+    line.setAttribute('stroke', isHour ? c : 'rgba(255,255,255,0.15)');
+    line.setAttribute('stroke-width', isHour?3:1);
+    line.setAttribute('stroke-linecap','round');
+    markersG.appendChild(line);
+  }
+  for(let i=0;i<12;i++){
+    const num = i===0?12:i, angle=(i*30-90)*Math.PI/180, r=104;
+    const txt = document.createElementNS('http://www.w3.org/2000/svg','text');
+    txt.setAttribute('x',150+r*Math.cos(angle)); txt.setAttribute('y',150+r*Math.sin(angle));
+    txt.setAttribute('text-anchor','middle'); txt.setAttribute('dominant-baseline','central');
+    txt.setAttribute('fill',c); txt.setAttribute('font-size','18');
+    txt.setAttribute('font-weight','600'); txt.setAttribute('font-family','-apple-system, sans-serif');
+    txt.textContent = num; numbersG.appendChild(txt);
+  }
+}
+
+// ─────────────────────────────────────────────
+// FLIP DIGIT
+// ─────────────────────────────────────────────
+function updateDigit(el, val) {
+  if(el.textContent===val) return;
+  el.classList.add('fading');
+  setTimeout(()=>{ el.textContent=val; el.classList.remove('fading'); },180);
+}
+
+// ─────────────────────────────────────────────
+// TICK
+// ─────────────────────────────────────────────
+function tick() {
+  const now = new Date();
+  const h = now.getHours().toString().padStart(2,'0');
+  const m = now.getMinutes().toString().padStart(2,'0');
+  const s = now.getSeconds().toString().padStart(2,'0');
+
+  updateDigit(digits.h0,h[0]); updateDigit(digits.h1,h[1]);
+  updateDigit(digits.m0,m[0]); updateDigit(digits.m1,m[1]);
+  updateDigit(digits.s0,s[0]); updateDigit(digits.s1,s[1]);
+
+  $('colon').style.opacity = now.getSeconds()%2===0 ? '1' : '0.15';
+
+  const L = LANGS[state.lang];
+  const dateStr = `${L.days[now.getDay()]}, ${L.months[now.getMonth()]} ${now.getDate()}`;
+  $('date-label').textContent  = dateStr;
+  $('analog-date').textContent = dateStr;
+
+  const sec=now.getSeconds(), min=now.getMinutes(), hr=now.getHours()%12;
+  $('hand-hour').setAttribute('transform',  `rotate(${hr*30+min*0.5},150,150)`);
+  $('hand-minute').setAttribute('transform',`rotate(${min*6+sec*0.1},150,150)`);
+  $('hand-second').setAttribute('transform',`rotate(${sec*6},150,150)`);
+
+  if($('cc-panel').classList.contains('visible')) {
+    const loc = state.lang === 'en' ? 'en-US' : state.lang === 'ro' ? 'ro-RO' : state.lang === 'de' ? 'de-DE' : state.lang === 'fr' ? 'fr-FR' : state.lang === 'es' ? 'es-ES' : 'ja-JP';
+    $('cc-time').textContent = now.toLocaleTimeString(loc);
+    $('cc-date-long').textContent = now.toLocaleDateString(loc, {weekday:'long',year:'numeric',month:'long',day:'numeric'});
+  }
+}
+setInterval(tick,1000); tick();
+
+// ─────────────────────────────────────────────
+// SLIDERS
+// ─────────────────────────────────────────────
+$('fw-range').addEventListener('input', e => {
+  state.fontWeight = Number(e.target.value);
+  $('fw-val').textContent = state.fontWeight;
+  applyStyles(); updateNavVals(); resetHideTimer();
+});
+$('fs-range').addEventListener('input', e => {
+  state.fontSize = Number(e.target.value);
+  $('fs-val').textContent = state.fontSize + 'vw';
+  applyStyles(); updateNavVals(); resetHideTimer();
+});
+$('analog-toggle').addEventListener('click', e => {
+  e.stopPropagation();
+  state.analog = !state.analog;
+  $('analog-toggle').classList.toggle('on', state.analog);
+  $('digital-wrap').style.display = state.analog ? 'none' : 'block';
+  $('analog-wrap').style.display  = state.analog ? 'flex'  : 'none';
+  applyStyles(); resetHideTimer();
+});
+
+// ─────────────────────────────────────────────
+// SETTINGS PANEL TOGGLE
+// ─────────────────────────────────────────────
+let hideTimer = null;
+function resetHideTimer() {
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(()=>{ $('settings-wrap').classList.remove('visible'); $('hint').classList.remove('hidden'); },6000);
+}
+$('app').addEventListener('click', e => {
+  if(e.target.closest('#settings-panel')||e.target.closest('#status-bar')||e.target.closest('#cc-panel')) return;
+  const v = $('settings-wrap').classList.toggle('visible');
+  $('hint').classList.toggle('hidden', v);
+  if(v) resetHideTimer();
+  else { clearTimeout(hideTimer); setTimeout(() => navTo('screen-root'), 300); }
+});
+$('settings-panel').addEventListener('click', e => e.stopPropagation());
+$('settings-close').addEventListener('click', () => {
+  $('settings-wrap').classList.remove('visible');
+  $('hint').classList.remove('hidden');
+  clearTimeout(hideTimer);
+  setTimeout(() => navTo('screen-root'), 300);
+});
+
+// ─────────────────────────────────────────────
+// CONTROL CENTER
+// ─────────────────────────────────────────────
+function openCC() {
+  $('cc-res').textContent  = `${screen.width} × ${screen.height}`;
+  $('cc-dpr').textContent  = `${window.devicePixelRatio}×`;
+  const online = navigator.onLine;
+  $('cc-online').textContent = online ? t('ccOnline') : t('ccOffline');
+  $('cc-wifi-icon').setAttribute('stroke', online ? '#30D158' : '#FF453A');
+  const conn = navigator.connection||navigator.mozConnection||navigator.webkitConnection;
+  $('cc-conn').textContent = conn ? `${(conn.effectiveType||conn.type||'').toUpperCase()}${conn.downlink?' · '+conn.downlink+' Mbps':''}` : '';
+  $('cc-platform').textContent = navigator.userAgentData?.platform||navigator.platform||'Unknown';
+  const brands = navigator.userAgentData?.brands?.filter(b=>!b.brand.includes('Not')).map(b=>b.brand).join(', ');
+  $('cc-browser').textContent = brands||navigator.userAgent.split(' ').pop();
+  $('cc-overlay').classList.add('visible'); $('cc-panel').classList.add('visible');
+  const loc = state.lang==='en'?'en-US':state.lang==='ro'?'ro-RO':state.lang==='de'?'de-DE':state.lang==='fr'?'fr-FR':state.lang==='es'?'es-ES':'ja-JP';
+  const now = new Date();
+  $('cc-time').textContent = now.toLocaleTimeString(loc);
+  $('cc-date-long').textContent = now.toLocaleDateString(loc,{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+}
+function closeCC() { $('cc-overlay').classList.remove('visible'); $('cc-panel').classList.remove('visible'); }
+$('status-bar').addEventListener('click', e=>{ e.stopPropagation(); openCC(); });
+$('cc-close').addEventListener('click', closeCC);
+$('cc-overlay').addEventListener('click', closeCC);
+
+// ─────────────────────────────────────────────
+// BATTERY
+// ─────────────────────────────────────────────
+if(navigator.getBattery){
+  navigator.getBattery().then(b=>{
+    const upd=()=>$('battery-pct').textContent=Math.round(b.level*100)+'%';
+    upd(); b.addEventListener('levelchange',upd);
+  }).catch(()=>{ $('battery-pct').textContent=''; });
+}
+
+// ─────────────────────────────────────────────
+// NAVIGATION
+// ─────────────────────────────────────────────
+let currentScreen = 'screen-root';
+const SCREEN_TITLES = {
+  'screen-root':     () => t('panelTitle'),
+  'screen-color':    () => t('lblColor'),
+  'screen-font':     () => t('lbl-font') || 'Font',
+  'screen-position': () => t('lblPos'),
+  'screen-wallpaper':() => t('lblWallpaper'),
+  'screen-language': () => t('lblLang'),
+};
+const SCREEN_PARENTS = {
+  'screen-color':     'screen-root',
+  'screen-font':      'screen-root',
+  'screen-position':  'screen-root',
+  'screen-wallpaper': 'screen-root',
+  'screen-language':  'screen-root',
+};
+
+function navTo(targetId) {
+  if (targetId === currentScreen) return;
+  const from = $(currentScreen);
+  const to   = $(targetId);
+  if (!from || !to) return;
+
+  const goingForward = targetId !== 'screen-root';
+
+  from.style.position = 'absolute';
+  from.style.width = '100%';
+  to.style.display = 'block';
+
+  from.classList.add(goingForward ? 'slide-out-left' : 'slide-out-right');
+  to.classList.add(goingForward   ? 'slide-in-right' : 'slide-in-left');
+
+  setTimeout(() => {
+    from.style.display = 'none';
+    from.style.position = '';
+    from.classList.remove('slide-out-left','slide-out-right');
+    to.classList.remove('slide-in-right','slide-in-left');
+    to.style.width = '';
+  }, 290);
+
+  currentScreen = targetId;
+
+  // Update header
+  const titleKey = SCREEN_TITLES[targetId];
+  $('panel-title-txt').textContent = titleKey ? titleKey() : targetId;
+  const backBtn = $('sp-back');
+  if (targetId === 'screen-root') {
+    backBtn.style.display = 'none';
+  } else {
+    backBtn.style.display = 'flex';
+    $('sp-back-label').textContent = t('panelTitle');
+  }
+}
+
+// Wire nav rows
+document.querySelectorAll('.sp-nav-row[data-target]').forEach(row => {
+  row.addEventListener('click', e => {
+    e.stopPropagation();
+    navTo(row.dataset.target);
+    resetHideTimer();
+  });
+});
+
+// Back button
+$('sp-back').addEventListener('click', e => {
+  e.stopPropagation();
+  const parent = SCREEN_PARENTS[currentScreen] || 'screen-root';
+  navTo(parent);
+  resetHideTimer();
+});
+
+// Update nav preview values
+function updateNavVals() {
+  // color preview dot
+  const colorVal = $('nav-color-val');
+  if (colorVal) {
+    colorVal.innerHTML = `<span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:${state.color || '#FF9F0A'};vertical-align:middle;border:1px solid rgba(255,255,255,0.2);"></span>`;
+  }
+  // font preview
+  const fontVal = $('nav-font-val');
+  if (fontVal) fontVal.textContent = `${state.fontWeight} · ${state.fontSize}vw`;
+  // position preview
+  const posVal = $('nav-pos-val');
+  if (posVal) {
+    const ICONS = {
+      'top-left':'↖','top-center':'↑','top-right':'↗',
+      'center-left':'←','center-center':'·','center-right':'→',
+      'bottom-left':'↙','bottom-center':'↓','bottom-right':'↘'
+    };
+    posVal.textContent = ICONS[state.clockPos] || '·';
+  }
+  // lang preview
+  const langVal = $('nav-lang-val');
+  if (langVal) langVal.textContent = LANGS[state.lang]?.code || '';
+}
+
+// ─────────────────────────────────────────────
+// LANGUAGE LIST (radio style)
+// ─────────────────────────────────────────────
+function buildLangList() {
+  const list = $('lang-list');
+  if (!list) return;
+  list.innerHTML = '';
+  LANG_ORDER.forEach((lc, i) => {
+    const row = document.createElement('div');
+    row.className = 'lang-list-row' + (lc === state.lang ? ' active' : '');
+    row.innerHTML = `<span class="lang-name">${LANGS[lc].code} — ${LANGS[lc].days[0].startsWith('Sun') ? 'English' : lc === 'ro' ? 'Română' : lc === 'de' ? 'Deutsch' : lc === 'fr' ? 'Français' : lc === 'es' ? 'Español' : '日本語'}</span><span class="lang-check">✓</span>`;
+    row.addEventListener('click', e => {
+      e.stopPropagation();
+      setLang(lc);
+      list.querySelectorAll('.lang-list-row').forEach(r => r.classList.remove('active'));
+      row.classList.add('active');
+      updateNavVals();
+      resetHideTimer();
+    });
+    if (i < LANG_ORDER.length - 1) {
+      row.style.borderBottom = '1px solid rgba(255,255,255,0.07)';
+    }
+    list.appendChild(row);
+  });
+}
+
+// ─────────────────────────────────────────────
+// CLOCK POSITION
+// ─────────────────────────────────────────────
+const POS_MAP = [
+  ['top-left','top-center','top-right'],
+  ['center-left','center-center','center-right'],
+  ['bottom-left','bottom-center','bottom-right'],
+];
+const JUSTIFY = { left:'flex-start', center:'center', right:'flex-end' };
+const ALIGN   = { top:'flex-start', center:'center', bottom:'flex-end' };
+
+function buildPosGrid() {
+  const grid = $('pos-grid');
+  grid.innerHTML = '';
+  POS_MAP.forEach((row, ri) => row.forEach((pos, ci) => {
+    const cell = document.createElement('div');
+    cell.className = 'pos-cell' + (state.clockPos === pos ? ' active' : '');
+    cell.dataset.pos = pos;
+    cell.addEventListener('click', e => {
+      e.stopPropagation();
+      state.clockPos = pos;
+      applyClockPos();
+      buildPosGrid();
+      updateNavVals();
+      resetHideTimer();
+    });
+    grid.appendChild(cell);
+  }));
+}
+
+const POS_COORDS = {
+  'top-left':      { top: '20%', left: '28%' },
+  'top-center':    { top: '20%', left: '50%' },
+  'top-right':     { top: '20%', left: '72%' },
+  'center-left':   { top: '50%', left: '28%' },
+  'center-center': { top: '50%', left: '50%' },
+  'center-right':  { top: '50%', left: '72%' },
+  'bottom-left':   { top: '75%', left: '28%' },
+  'bottom-center': { top: '75%', left: '50%' },
+  'bottom-right':  { top: '75%', left: '72%' },
+};
+
+function applyClockPos() {
+  const coords = POS_COORDS[state.clockPos] || POS_COORDS['center-center'];
+  const face = $('clock-face');
+  face.style.top  = coords.top;
+  face.style.left = coords.left;
+}
+
+// ─────────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────────
+state.color = state.wallpaperAutoColor;
+buildLangBar();
+buildColorPalette();
+buildAnalogMarkers();
+rebuildWpGrid();
+buildPosGrid();
+buildLangList();
+applyClockPos();
+applyStyles();
+applyLangUI();
+updateNavVals();
+</script>
+</body>
+</html>
