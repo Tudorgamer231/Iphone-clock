@@ -26,7 +26,7 @@ git clone https://github.com/tudustech/iphone-clock.git
 open index.html
 ```
  
-Sau accesează live pe **GitHub Pages**: `https://tudustech.github.io/iphone-clock`
+Sau accesează live pe **GitHub Pages**: `https://tudorgamer231.github.io/iphone-clock`
  
 ## 🎨 Personalizare
  
